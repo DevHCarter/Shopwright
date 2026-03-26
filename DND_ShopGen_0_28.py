@@ -1,7 +1,3 @@
-"""
-D&D Shop Generator — DND_ShopGen_0v22.py
-"""
-
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import csv
