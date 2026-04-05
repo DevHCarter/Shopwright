@@ -755,6 +755,24 @@ def init_db():
         con.commit()
     except sqlite3.OperationalError:
         pass
+    try:
+        con.executescript("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id     INTEGER,
+                shop_name   TEXT,
+                item_name   TEXT NOT NULL,
+                rarity      TEXT,
+                quantity    INTEGER DEFAULT 1,
+                price       TEXT,
+                session_tag TEXT DEFAULT '',
+                action      TEXT DEFAULT 'sold',
+                timestamp   TEXT DEFAULT (datetime('now'))
+            );
+        """)
+        con.commit()
+    except sqlite3.OperationalError:
+        pass
     con.close()
 
 
@@ -1028,6 +1046,31 @@ SHOP_INFO: dict[str, dict] = {
 }
 
 
+class ToolTip:
+    """Simple hover tooltip for any tkinter widget."""
+    def __init__(self, widget, text):
+        self._widget = widget
+        self._text   = text
+        self._tip    = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+
+    def _show(self, event=None):
+        x = self._widget.winfo_rootx() + 20
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+        self._tip = tk.Toplevel(self._widget)
+        self._tip.wm_overrideredirect(True)
+        self._tip.wm_geometry(f"+{x}+{y}")
+        tk.Label(self._tip, text=self._text, background="#ffffe0",
+                 foreground="#000000", relief="solid", borderwidth=1,
+                 font=("Georgia", 9), padx=4, pady=2).pack()
+
+    def _hide(self, event=None):
+        if self._tip:
+            self._tip.destroy()
+            self._tip = None
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  GUI
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1037,8 +1080,9 @@ class ShopApp(tk.Tk):
         self.title("D&D Shop Generator")
         self.geometry("1380x860")
         self.minsize(1100, 700)
-        self.configure(bg="#1a1a2e")
-        self._apply_theme()
+        self.theme_mode = tk.StringVar(value="dark")
+        self._apply_theme(self.theme_mode.get())
+        self.configure(bg=self.colors["hdr"])
 
         # ── State ─────────────────────────────────────────────────────────────
         self.current_items: list[dict] = []
@@ -1058,6 +1102,13 @@ class ShopApp(tk.Tk):
         # Table display column toggles
         self.show_qty_col      = tk.BooleanVar(value=True)
         self.show_est_val_col  = tk.BooleanVar(value=True)
+
+        # Tab visibility toggles (optional tabs only; Shop/Stock Settings/Saves always shown)
+        self.tab_vis_sell       = tk.BooleanVar(value=True)
+        self.tab_vis_gallery    = tk.BooleanVar(value=True)
+        self.tab_vis_shopkeeper = tk.BooleanVar(value=True)
+        self.tab_vis_shop_info  = tk.BooleanVar(value=True)
+        self.tab_vis_log        = tk.BooleanVar(value=True)
 
         # Rarity slider vars
         self.rarity_sliders: dict[str, tk.IntVar] = {
@@ -1110,11 +1161,34 @@ class ShopApp(tk.Tk):
         self._refresh_campaign_list()
 
     # ── Theme ─────────────────────────────────────────────────────────────────
-    def _apply_theme(self):
+    def _apply_theme(self, mode: str = "dark"):
         style = ttk.Style(self)
         style.theme_use("clam")
-        bg, fg, accent, sel = "#1a1a2e", "#e0d8c0", "#c9a84c", "#2d2d4e"
-        hdr = "#0f0f1e"
+
+        if mode == "light":
+            bg, fg, accent, sel = "#f5f0e8", "#2a2010", "#7a4f0e", "#e0d8c0"
+            hdr                 = "#ede5d0"
+            row_odd             = "#f0ece0"
+            row_even            = "#e8e4d8"
+            row_locked_odd      = "#e8ead8"
+            row_locked_even     = "#dfe0d0"
+            row_selected        = "#d4c898"
+            btn_active          = "#9b6b1e"
+        else:  # dark
+            bg, fg, accent, sel = "#1a1a2e", "#e0d8c0", "#c9a84c", "#2d2d4e"
+            hdr                 = "#0f0f1e"
+            row_odd             = "#1e1e30"
+            row_even            = "#171725"
+            row_locked_odd      = "#1e1e10"
+            row_locked_even     = "#17170d"
+            row_selected        = "#2e2a14"
+            btn_active          = "#e6c06a"
+
+        self.ROW_ODD          = row_odd
+        self.ROW_EVEN         = row_even
+        self.ROW_LOCKED_ODD   = row_locked_odd
+        self.ROW_LOCKED_EVEN  = row_locked_even
+        self.ROW_SELECTED     = row_selected
 
         style.configure(".",           background=bg, foreground=fg, font=("Georgia", 10))
         style.configure("TNotebook",   background=hdr, borderwidth=0)
@@ -1127,12 +1201,12 @@ class ShopApp(tk.Tk):
         style.configure("TLabel",  background=bg, foreground=fg)
         style.configure("TButton", background=accent, foreground=hdr,
                         font=("Georgia", 10, "bold"), padding=6, relief="flat")
-        style.map("TButton", background=[("active", "#e6c06a")])
+        style.map("TButton", background=[("active", btn_active)])
         style.configure("Danger.TButton", background="#8b0000", foreground="#e0d8c0")
         style.map("Danger.TButton", background=[("active", "#b22222")])
         style.configure("Treeview",
-                        background=ROW_ODD, foreground=fg,
-                        fieldbackground=ROW_ODD, rowheight=26,
+                        background=row_odd, foreground=fg,
+                        fieldbackground=row_odd, rowheight=26,
                         font=("Consolas", 9))
         style.configure("Treeview.Heading",
                         background=hdr, foreground=accent,
@@ -1145,6 +1219,91 @@ class ShopApp(tk.Tk):
         style.configure("TEntry",  fieldbackground=sel, foreground=fg, insertcolor=fg)
         style.configure("TSeparator", background=accent)
         self.colors = {"bg": bg, "fg": fg, "accent": accent, "sel": sel, "hdr": hdr}
+
+    def _switch_theme(self):
+        """Toggle between dark and light mode and recolor all widgets."""
+        self._old_hdr = self.colors["hdr"]
+        self._old_bg  = self.colors["bg"]
+        self._apply_theme(self.theme_mode.get())
+        self.configure(bg=self.colors["hdr"])
+
+        # Update Treeview row tag backgrounds
+        for tree_attr in ("tree", "sell_results_tree", "gallery_tree"):
+            tw = getattr(self, tree_attr, None)
+            if tw:
+                tw.tag_configure("odd",  background=self.ROW_ODD)
+                tw.tag_configure("even", background=self.ROW_EVEN)
+        if hasattr(self, "tree"):
+            self.tree.tag_configure("locked_odd",   background=self.ROW_LOCKED_ODD)
+            self.tree.tag_configure("locked_even",  background=self.ROW_LOCKED_EVEN)
+            self.tree.tag_configure("selected_row", background=self.ROW_SELECTED)
+        if hasattr(self, "log_tree"):
+            self.log_tree.tag_configure("odd",  background=self.ROW_ODD)
+            self.log_tree.tag_configure("even", background=self.ROW_EVEN)
+
+        self._recolor_widgets(self.winfo_children())
+        self._populate_table(self.current_items)
+        if hasattr(self, "log_tree"):
+            self._refresh_log()
+
+    def _recolor_widgets(self, widgets):
+        """Recursively update bg/fg on all non-ttk (tk.*) widgets."""
+        c    = self.colors
+        ttk_classes = {
+            "TButton", "TLabel", "TFrame", "TNotebook", "TNotebook.Tab",
+            "TCombobox", "TScale", "TEntry", "TSeparator", "TScrollbar",
+            "TSpinbox", "Treeview", "Treeview.Heading",
+        }
+        for w in widgets:
+            cls = w.winfo_class()
+            if cls in ttk_classes:
+                pass  # handled by ttk.Style
+            elif cls == "Frame":
+                try:
+                    cur = w.cget("bg")
+                    w.configure(bg=c["hdr"] if cur == self._old_hdr else c["bg"])
+                except Exception:
+                    pass
+            elif cls in ("Label", "Checkbutton", "Radiobutton"):
+                try:
+                    cur    = w.cget("bg")
+                    new_bg = c["hdr"] if cur == self._old_hdr else c["bg"]
+                    w.configure(bg=new_bg, fg=c["fg"],
+                                activebackground=new_bg,
+                                activeforeground=c["accent"],
+                                selectcolor=c["sel"])
+                except Exception:
+                    pass
+            elif cls in ("Entry", "Text"):
+                try:
+                    w.configure(bg=c["sel"], fg=c["fg"], insertbackground=c["fg"])
+                except Exception:
+                    pass
+            elif cls == "Button":
+                try:
+                    w.configure(bg=c["sel"], fg=c["fg"],
+                                activebackground=c["hdr"],
+                                activeforeground=c["accent"])
+                except Exception:
+                    pass
+            elif cls == "Canvas":
+                try:
+                    w.configure(bg=c["bg"])
+                except Exception:
+                    pass
+            elif cls == "Spinbox":
+                try:
+                    w.configure(bg=c["sel"], fg=c["fg"],
+                                insertbackground=c["fg"],
+                                buttonbackground=c["sel"])
+                except Exception:
+                    pass
+            try:
+                children = w.winfo_children()
+                if children:
+                    self._recolor_widgets(children)
+            except Exception:
+                pass
 
     # ── Main UI ───────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -1180,6 +1339,7 @@ class ShopApp(tk.Tk):
         # ── Notebook ───────────────────────────────────────────────────────────
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+        self.nb = nb
 
         self.tab_action      = ttk.Frame(nb)
         self.tab_settings    = ttk.Frame(nb)
@@ -1188,6 +1348,7 @@ class ShopApp(tk.Tk):
         self.tab_gallery     = ttk.Frame(nb)
         self.tab_shopkeeper  = ttk.Frame(nb)
         self.tab_shop_info   = ttk.Frame(nb)
+        self.tab_log         = ttk.Frame(nb)
         nb.add(self.tab_action,      text="  ▶ Shop  ")
         nb.add(self.tab_settings,    text="  ⚙️ Stock Settings  ")
         nb.add(self.tab_sell,        text="  💰 Sell Item  ")
@@ -1195,6 +1356,7 @@ class ShopApp(tk.Tk):
         nb.add(self.tab_gallery,     text="  🕮 Item Gallery  ")
         nb.add(self.tab_shopkeeper,  text="  ✦ Shopkeeper  ")
         nb.add(self.tab_shop_info,   text="  ℹ Shop Info  ")
+        nb.add(self.tab_log,         text="  📜 Transaction Log  ")
 
         self._build_action_tab()
         self._build_settings_tab()
@@ -1203,7 +1365,10 @@ class ShopApp(tk.Tk):
         self._build_gallery_tab()
         self._build_shopkeeper_tab()
         self._build_shop_info_tab()
+        self._build_log_tab()
+        nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self._setup_hover_scroll()
+        self._bind_shortcuts()
 
     # ── Global hover-aware scroll ─────────────────────────────────────────────
     def _setup_hover_scroll(self):
@@ -1334,8 +1499,8 @@ class ShopApp(tk.Tk):
             self.sell_results_tree.tag_configure(
                 rarity.replace(" ", "_"), foreground=color)
         # alternating rows
-        self.sell_results_tree.tag_configure("odd",  background=ROW_ODD)
-        self.sell_results_tree.tag_configure("even", background=ROW_EVEN)
+        self.sell_results_tree.tag_configure("odd",  background=self.ROW_ODD)
+        self.sell_results_tree.tag_configure("even", background=self.ROW_EVEN)
 
         vsb = ttk.Scrollbar(results_frame, orient="vertical",
                             command=self.sell_results_tree.yview)
@@ -1552,15 +1717,22 @@ class ShopApp(tk.Tk):
         # Button bar
         btn_bar = tk.Frame(left, bg=c["hdr"], pady=6)
         btn_bar.pack(fill="x")
-        ttk.Button(btn_bar, text="⚡ Generate Shop",
-                   command=self._run_generate).pack(side="left", padx=6)
-        ttk.Button(btn_bar, text="↻ Reroll (10-30%)",
-                   command=self._reroll).pack(side="left", padx=6)
-        ttk.Button(btn_bar, text="✖ Clear Shop",
-                   style="Danger.TButton",
-                   command=self._clear).pack(side="left", padx=6)
-        ttk.Button(btn_bar, text="＋ Add Item",
-                   command=self._open_add_item_dialog).pack(side="left", padx=6)
+        btn_gen = ttk.Button(btn_bar, text="⚡ Generate Shop", command=self._run_generate)
+        btn_gen.pack(side="left", padx=6)
+        ToolTip(btn_gen, "Generate a new shop inventory  (Ctrl+G)")
+
+        btn_reroll = ttk.Button(btn_bar, text="↻ Reroll (10-30%)", command=self._reroll)
+        btn_reroll.pack(side="left", padx=6)
+        ToolTip(btn_reroll, "Replace ~20% of unlocked items  (Ctrl+R)")
+
+        btn_clear = ttk.Button(btn_bar, text="✖ Clear Shop", style="Danger.TButton",
+                               command=self._clear)
+        btn_clear.pack(side="left", padx=6)
+        ToolTip(btn_clear, "Clear the current shop inventory")
+
+        btn_add = ttk.Button(btn_bar, text="＋ Add Item", command=self._open_add_item_dialog)
+        btn_add.pack(side="left", padx=6)
+        ToolTip(btn_add, "Manually add an item from the database")
 
         # ── Discount / Markup slider ──
         tk.Frame(btn_bar, bg=c["sel"], width=2, height=26).pack(
@@ -1600,11 +1772,11 @@ class ShopApp(tk.Tk):
                              anchor="w" if col == "name" else "center")
 
         # Row tags
-        self.tree.tag_configure("odd",          background=ROW_ODD)
-        self.tree.tag_configure("even",         background=ROW_EVEN)
-        self.tree.tag_configure("locked_odd",   background=ROW_LOCKED_ODD)
-        self.tree.tag_configure("locked_even",  background=ROW_LOCKED_EVEN)
-        self.tree.tag_configure("selected_row", background=ROW_SELECTED)
+        self.tree.tag_configure("odd",          background=self.ROW_ODD)
+        self.tree.tag_configure("even",         background=self.ROW_EVEN)
+        self.tree.tag_configure("locked_odd",   background=self.ROW_LOCKED_ODD)
+        self.tree.tag_configure("locked_even",  background=self.ROW_LOCKED_EVEN)
+        self.tree.tag_configure("selected_row", background=self.ROW_SELECTED)
 
         RARITY_FG = RARITY_COLORS_MAP
         for rarity, color in RARITY_FG.items():
@@ -1618,6 +1790,9 @@ class ShopApp(tk.Tk):
 
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Double-1>",         self._on_double_click)
+        self.tree.bind("<Button-3>",         self._on_tree_right_click)
+
+        self._build_tree_context_menu()
 
         # Apply initial column visibility (respects BoolVar defaults)
         self._update_display_columns()
@@ -2229,64 +2404,6 @@ class ShopApp(tk.Tk):
                            activebackground=c["bg"], activeforeground=c["accent"],
                            font=("Georgia", 10)).pack(anchor="w", pady=2)
 
-        ttk.Separator(left_col, orient="horizontal").pack(fill="x", pady=10)
-
-        tk.Label(left_col, text="Shop Mode",
-                 font=("Georgia", 11, "bold"),
-                 bg=c["bg"], fg=c["accent"]).pack(anchor="w", pady=(0, 6))
-
-        mundane_chk = tk.Checkbutton(
-            left_col,
-            text="Non-Magical Shop\n(common items at most)",
-            variable=self.mundane_only_var,
-            command=self._on_mundane_only_toggle,
-            bg=c["bg"], fg=c["fg"],
-            selectcolor=c["sel"],
-            activebackground=c["bg"], activeforeground=c["accent"],
-            font=("Georgia", 10),
-            justify="left",
-            anchor="w",
-        )
-        
-        homebrew_chk = tk.Checkbutton(
-            left_col,
-            text="DND Official Only\n(removes all homebrew items)",
-            variable=self.exclude_homebrew_var,
-            bg=c["bg"], fg=c["fg"],
-            selectcolor=c["sel"],
-            activebackground=c["bg"], activeforeground=c["accent"],
-            font=("Georgia", 10),
-            justify="left",
-            anchor="w",
-        )
-        homebrew_chk.pack(anchor="w", pady=2)
-        tk.Label(left_col,
-                 text="Filters out all homebrew items\n (The Griffon's Saddlebag Books 1-5)",
-                 bg=c["bg"], fg=c["fg"],
-                 font=("Georgia", 8, "italic"),
-                 justify="left").pack(anchor="w", pady=(0, 4))
-
-        ttk.Separator(left_col, orient="horizontal").pack(fill="x", pady=10)
-
-        # ── Table Display Settings ─────────────────────────────────────────────
-        tk.Label(left_col, text="Table Display",
-                 font=("Georgia", 11, "bold"),
-                 bg=c["bg"], fg=c["accent"]).pack(anchor="w", pady=(0, 6))
-        tk.Checkbutton(
-            left_col, text="Show Quantity column",
-            variable=self.show_qty_col,
-            command=self._update_display_columns,
-            bg=c["bg"], fg=c["fg"], selectcolor=c["sel"],
-            activebackground=c["bg"], activeforeground=c["accent"],
-            font=("Georgia", 10)).pack(anchor="w", pady=2)
-        tk.Checkbutton(
-            left_col, text="Show DMG Price Range column",
-            variable=self.show_est_val_col,
-            command=self._update_display_columns,
-            bg=c["bg"], fg=c["fg"], selectcolor=c["sel"],
-            activebackground=c["bg"], activeforeground=c["accent"],
-            font=("Georgia", 10)).pack(anchor="w", pady=2)
-
         # Rarity sliders
         right_col = ttk.Frame(outer)
         right_col.pack(side="left", fill="y", padx=(0, 20))
@@ -2760,8 +2877,8 @@ class ShopApp(tk.Tk):
         c = self.colors
         win = tk.Toplevel(self)
         win.title("App Settings")
-        win.geometry("520x600")
-        win.minsize(440, 480)
+        win.geometry("520x720")
+        win.minsize(440, 520)
         win.configure(bg=c["hdr"])
         win.resizable(True, True)
         self._app_settings_win = win
@@ -2900,7 +3017,82 @@ class ShopApp(tk.Tk):
                  bg=c["hdr"], fg=c["fg"],
                  font=("Georgia", 7, "italic")).pack(side="left", padx=8)
 
-        # ── Section: Culture Tags ──────────────────────────────────────────────
+        # ── Section: Shop Mode ────────────────────────────────────────────────
+        section("Shop Mode")
+
+        _mundane_var = tk.BooleanVar(value=self.mundane_only_var.get())
+        tk.Checkbutton(body,
+                       text="Non-Magical Shop  (common items at most)",
+                       variable=_mundane_var,
+                       bg=c["hdr"], fg=c["fg"], selectcolor=c["sel"],
+                       activebackground=c["hdr"], activeforeground=c["accent"],
+                       font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
+
+        _homebrew_var = tk.BooleanVar(value=self.exclude_homebrew_var.get())
+        tk.Checkbutton(body,
+                       text="DND Official Only  (removes all homebrew items)",
+                       variable=_homebrew_var,
+                       bg=c["hdr"], fg=c["fg"], selectcolor=c["sel"],
+                       activebackground=c["hdr"], activeforeground=c["accent"],
+                       font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
+        tk.Label(body, text="Filters out The Griffon's Saddlebag Books 1–5",
+                 bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 8, "italic")).pack(anchor="w", padx=pad+16, pady=(0, 4))
+
+        # ── Section: Table Display ────────────────────────────────────────────
+        section("Table Display")
+
+        _qty_var = tk.BooleanVar(value=self.show_qty_col.get())
+        tk.Checkbutton(body, text="Show Quantity column",
+                       variable=_qty_var,
+                       bg=c["hdr"], fg=c["fg"], selectcolor=c["sel"],
+                       activebackground=c["hdr"], activeforeground=c["accent"],
+                       font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
+
+        _estval_var = tk.BooleanVar(value=self.show_est_val_col.get())
+        tk.Checkbutton(body, text="Show DMG Price Range column",
+                       variable=_estval_var,
+                       bg=c["hdr"], fg=c["fg"], selectcolor=c["sel"],
+                       activebackground=c["hdr"], activeforeground=c["accent"],
+                       font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
+
+        # ── Section: Appearance ───────────────────────────────────────────────
+        section("Appearance")
+
+        _theme_var = tk.StringVar(value=self.theme_mode.get())
+        tk.Checkbutton(body, text="Light Mode",
+                       variable=_theme_var,
+                       onvalue="light", offvalue="dark",
+                       bg=c["hdr"], fg=c["fg"], selectcolor=c["sel"],
+                       activebackground=c["hdr"], activeforeground=c["accent"],
+                       font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
+
+        # ── Section: Tab Visibility ───────────────────────────────────────────
+        section("Tab Visibility")
+        tk.Label(body,
+                 text="Shop, Stock Settings, and Campaigns & Saves are always visible.",
+                 bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 8, "italic")).pack(anchor="w", padx=pad, pady=(0, 6))
+
+        _vis_sell_var       = tk.BooleanVar(value=self.tab_vis_sell.get())
+        _vis_gallery_var    = tk.BooleanVar(value=self.tab_vis_gallery.get())
+        _vis_shopkeeper_var = tk.BooleanVar(value=self.tab_vis_shopkeeper.get())
+        _vis_shopinfo_var   = tk.BooleanVar(value=self.tab_vis_shop_info.get())
+        _vis_log_var        = tk.BooleanVar(value=self.tab_vis_log.get())
+
+        for text, var in [
+            ("💰 Sell Item",        _vis_sell_var),
+            ("🕮 Item Gallery",      _vis_gallery_var),
+            ("✦ Shopkeeper",         _vis_shopkeeper_var),
+            ("ℹ Shop Info",          _vis_shopinfo_var),
+            ("📜 Transaction Log",   _vis_log_var),
+        ]:
+            tk.Checkbutton(body, text=text, variable=var,
+                           bg=c["hdr"], fg=c["fg"], selectcolor=c["sel"],
+                           activebackground=c["hdr"], activeforeground=c["accent"],
+                           font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
+
+        # ── Section: About ────────────────────────────────────────────────────
         section("About")
         tk.Label(body,
                  text="Settings apply immediately on Save.\n"
@@ -2920,7 +3112,6 @@ class ShopApp(tk.Tk):
             raw_races = [ln.strip() for ln in race_txt.get("1.0", "end").splitlines()
                          if ln.strip()]
             self._custom_races = raw_races if raw_races else list(SHOPKEEPER_POOLS["races"])
-            # Update the race combobox in the settings tab
             if hasattr(self, "_sk_race_combo") and self._sk_race_combo.winfo_exists():
                 self._sk_race_combo.configure(values=self._custom_races)
 
@@ -2931,14 +3122,209 @@ class ShopApp(tk.Tk):
             self._app_settings["default_price_mod"]   = _def_price_var.get()
             self._app_settings["auto_name_on_change"] = _auto_name_var.get()
             self._app_settings["gallery_per_page"]    = int(_gall_per_var.get())
-
-            # Apply gallery per-page immediately
             self._gallery_per_page.set(self._app_settings["gallery_per_page"])
+
+            # Shop Mode
+            self.mundane_only_var.set(_mundane_var.get())
+            self.exclude_homebrew_var.set(_homebrew_var.get())
+            self._on_mundane_only_toggle()
+
+            # Table Display
+            self.show_qty_col.set(_qty_var.get())
+            self.show_est_val_col.set(_estval_var.get())
+            self._update_display_columns()
+
+            # Appearance / theme
+            self.theme_mode.set(_theme_var.get())
+            self._switch_theme()
+
+            # Tab visibility
+            self.tab_vis_sell.set(_vis_sell_var.get())
+            self.tab_vis_gallery.set(_vis_gallery_var.get())
+            self.tab_vis_shopkeeper.set(_vis_shopkeeper_var.get())
+            self.tab_vis_shop_info.set(_vis_shopinfo_var.get())
+            self.tab_vis_log.set(_vis_log_var.get())
+            self._apply_tab_visibility()
 
             win.destroy()
 
         ttk.Button(footer, text="✔  Save", command=_save_app_settings).pack(side="right")
         ttk.Button(footer, text="✕  Cancel", command=win.destroy).pack(side="right", padx=(0, 6))
+
+    # ── Transaction Log Tab ───────────────────────────────────────────────────
+    def _build_log_tab(self):
+        c = self.colors
+        f = self.tab_log
+
+        # Filter bar
+        bar = tk.Frame(f, bg=c["hdr"], pady=6)
+        bar.pack(fill="x")
+        tk.Label(bar, text="📜  Transaction Log",
+                 font=("Georgia", 13, "bold"),
+                 bg=c["hdr"], fg=c["accent"]).pack(side="left", padx=(10, 16))
+
+        tk.Label(bar, text="Shop:", bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 9)).pack(side="left")
+        self.log_filter_var = tk.StringVar(value="(All)")
+        self.log_filter_combo = ttk.Combobox(
+            bar, textvariable=self.log_filter_var,
+            values=["(All)"], width=22, state="readonly")
+        self.log_filter_combo.pack(side="left", padx=(4, 12))
+        self.log_filter_combo.bind("<<ComboboxSelected>>", lambda _: self._refresh_log())
+
+        tk.Label(bar, text="Session:", bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 9)).pack(side="left")
+        self.log_session_filter_var = tk.StringVar(value="(All)")
+        self.log_session_combo = ttk.Combobox(
+            bar, textvariable=self.log_session_filter_var,
+            values=["(All)"], width=16, state="readonly")
+        self.log_session_combo.pack(side="left", padx=(4, 12))
+        self.log_session_combo.bind("<<ComboboxSelected>>", lambda _: self._refresh_log())
+
+        # Treeview
+        tree_frame = ttk.Frame(f)
+        tree_frame.pack(fill="both", expand=True, padx=8, pady=4)
+
+        log_cols   = ("timestamp", "shop", "item", "rarity", "qty", "price", "session", "action")
+        log_hdrs   = ("Timestamp", "Shop", "Item", "Rarity", "Qty", "Price", "Session", "Action")
+        log_widths = (145, 130, 200, 90, 45, 90, 110, 65)
+        self.log_tree = ttk.Treeview(tree_frame, columns=log_cols,
+                                      show="headings", selectmode="browse")
+        for col, hdr, w in zip(log_cols, log_hdrs, log_widths):
+            self.log_tree.heading(col, text=hdr,
+                                   command=lambda c_=col: self._log_sort(c_))
+            self.log_tree.column(col, width=w,
+                                  anchor="w" if col in ("shop", "item") else "center")
+
+        log_vsb = ttk.Scrollbar(tree_frame, orient="vertical",
+                                  command=self.log_tree.yview)
+        self.log_tree.configure(yscrollcommand=log_vsb.set)
+        self.log_tree.pack(side="left", fill="both", expand=True)
+        log_vsb.pack(side="right", fill="y")
+
+        for rarity, color in RARITY_COLORS_MAP.items():
+            self.log_tree.tag_configure(rarity.replace(" ", "_"), foreground=color)
+        self.log_tree.tag_configure("odd",  background=self.ROW_ODD)
+        self.log_tree.tag_configure("even", background=self.ROW_EVEN)
+
+        # Button bar
+        btn_bar = tk.Frame(f, bg=c["hdr"], pady=4)
+        btn_bar.pack(fill="x", padx=8)
+        ttk.Button(btn_bar, text="↻ Refresh",
+                   command=self._refresh_log).pack(side="left", padx=4)
+        ttk.Button(btn_bar, text="Export CSV",
+                   command=self._export_log_csv).pack(side="left", padx=4)
+        ttk.Button(btn_bar, text="✖ Clear Log",
+                   style="Danger.TButton",
+                   command=self._clear_log).pack(side="left", padx=4)
+
+        self._log_sort_col = "timestamp"
+        self._log_sort_asc = False
+
+    def _on_tab_changed(self, event=None):
+        if event is None:
+            return
+        nb  = event.widget
+        tab = nb.select()
+        try:
+            if "Transaction Log" in nb.tab(tab, "text"):
+                self._refresh_log()
+        except Exception:
+            pass
+
+    def _refresh_log(self):
+        if not hasattr(self, "log_tree"):
+            return
+        shop_filter    = self.log_filter_var.get()
+        session_filter = self.log_session_filter_var.get()
+
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        shops    = ["(All)"] + [r[0] for r in cur.execute(
+            "SELECT DISTINCT shop_name FROM transactions ORDER BY shop_name").fetchall()
+            if r[0]]
+        sessions = ["(All)"] + [r[0] for r in cur.execute(
+            "SELECT DISTINCT session_tag FROM transactions "
+            "WHERE session_tag != '' ORDER BY session_tag").fetchall()]
+        con.close()
+
+        self.log_filter_combo.configure(values=shops)
+        self.log_session_combo.configure(values=sessions)
+
+        col_sql = {
+            "timestamp": "timestamp", "shop": "shop_name",
+            "item": "item_name", "rarity": "rarity",
+            "qty": "quantity", "price": "price",
+            "session": "session_tag", "action": "action",
+        }
+        order_col = col_sql.get(self._log_sort_col, "timestamp")
+        direction = "ASC" if self._log_sort_asc else "DESC"
+
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        q      = ("SELECT timestamp,shop_name,item_name,rarity,quantity,"
+                  "price,session_tag,action FROM transactions")
+        params: list = []
+        clauses: list[str] = []
+        if shop_filter != "(All)":
+            clauses.append("shop_name=?"); params.append(shop_filter)
+        if session_filter != "(All)":
+            clauses.append("session_tag=?"); params.append(session_filter)
+        if clauses:
+            q += " WHERE " + " AND ".join(clauses)
+        q += f" ORDER BY {order_col} {direction}"
+        rows = cur.execute(q, params).fetchall()
+        con.close()
+
+        self.log_tree.delete(*self.log_tree.get_children())
+        for idx, row in enumerate(rows):
+            ts, shop, item, rarity, qty, price, session, action = row
+            r_tag  = normalize_rarity(rarity or "").replace(" ", "_")
+            parity = "odd" if idx % 2 == 0 else "even"
+            tags   = (parity,) + ((r_tag,) if r_tag else ())
+            self.log_tree.insert("", "end",
+                values=(ts, shop, item, rarity, qty, price, session, action),
+                tags=tags)
+
+    def _log_sort(self, col: str):
+        if self._log_sort_col == col:
+            self._log_sort_asc = not self._log_sort_asc
+        else:
+            self._log_sort_col = col
+            self._log_sort_asc = True
+        self._refresh_log()
+
+    def _export_log_csv(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export Transaction Log")
+        if not path:
+            return
+        con  = sqlite3.connect(DB_PATH)
+        rows = con.execute(
+            "SELECT timestamp,shop_name,item_name,rarity,quantity,price,"
+            "session_tag,action FROM transactions ORDER BY timestamp DESC"
+        ).fetchall()
+        con.close()
+        import csv as _csv
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = _csv.writer(fh)
+            writer.writerow(["Timestamp","Shop","Item","Rarity","Qty",
+                              "Price","Session","Action"])
+            writer.writerows(rows)
+        messagebox.showinfo("Exported", f"Transaction log exported to:\n{path}")
+
+    def _clear_log(self):
+        if not messagebox.askyesno("Clear Log",
+                "Delete all transaction records? This cannot be undone."):
+            return
+        con = sqlite3.connect(DB_PATH)
+        con.execute("DELETE FROM transactions")
+        con.commit()
+        con.close()
+        self._refresh_log()
+        self.status_var.set("Transaction log cleared.")
 
     # ── Tag filter UI ────────────────────────────────────────────────────────
     def _build_tag_filter(self, parent: tk.Frame):
@@ -3466,6 +3852,188 @@ class ShopApp(tk.Tk):
                 break
         self._populate_table(self.current_items)
 
+    # ── Tab Visibility ────────────────────────────────────────────────────────
+    def _apply_tab_visibility(self):
+        """Show or hide optional notebook tabs based on visibility BoolVars."""
+        optional_tabs = [
+            (self.tab_sell,       "  💰 Sell Item  ",        self.tab_vis_sell),
+            (self.tab_gallery,    "  🕮 Item Gallery  ",      self.tab_vis_gallery),
+            (self.tab_shopkeeper, "  ✦ Shopkeeper  ",         self.tab_vis_shopkeeper),
+            (self.tab_shop_info,  "  ℹ Shop Info  ",          self.tab_vis_shop_info),
+            (self.tab_log,        "  📜 Transaction Log  ",   self.tab_vis_log),
+        ]
+        for frame, text, var in optional_tabs:
+            if var.get():
+                try:
+                    self.nb.add(frame, text=text)
+                except tk.TclError:
+                    pass  # already shown
+            else:
+                try:
+                    self.nb.hide(frame)
+                except tk.TclError:
+                    pass  # already hidden
+
+    # ── Keyboard Shortcuts ────────────────────────────────────────────────────
+    def _bind_shortcuts(self):
+        self.bind("<Control-g>", lambda e: self._run_generate())
+        self.bind("<Control-G>", lambda e: self._run_generate())
+        self.bind("<Control-r>", lambda e: self._reroll())
+        self.bind("<Control-R>", lambda e: self._reroll())
+        self.bind("<Control-s>", lambda e: self._save_shop())
+        self.bind("<Control-S>", lambda e: self._save_shop())
+        self.bind("<Control-e>", lambda e: self._export_json())
+        self.bind("<Control-E>", lambda e: self._export_json())
+        self.bind("<space>",     self._shortcut_toggle_lock)
+
+    def _shortcut_toggle_lock(self, event=None):
+        focused = self.focus_get()
+        if isinstance(focused, (tk.Entry, tk.Text, ttk.Combobox)):
+            return
+        sel = self.tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        for item in self.current_items:
+            if item["name"] == iid:
+                item["locked"] = not item.get("locked", False)
+                break
+        self._populate_table(self.current_items)
+
+    # ── Right-click Context Menu ───────────────────────────────────────────────
+    def _build_tree_context_menu(self):
+        c = self.colors
+        self._tree_ctx_menu = tk.Menu(self, tearoff=0,
+                                      bg=c["hdr"], fg=c["fg"],
+                                      activebackground=c["accent"],
+                                      activeforeground=c["hdr"])
+        self._tree_ctx_menu.add_command(label="⟳  Reroll This Item",
+                                        command=self._ctx_reroll_item)
+        self._tree_ctx_menu.add_command(label="◆  Toggle Lock",
+                                        command=self._ctx_toggle_lock)
+        self._tree_ctx_menu.add_separator()
+        self._tree_ctx_menu.add_command(label="💰  Mark as Sold...",
+                                        command=self._ctx_mark_as_sold)
+
+    def _on_tree_right_click(self, event):
+        iid = self.tree.identify_row(event.y)
+        if iid:
+            self.tree.selection_set(iid)
+            self._on_select()
+        try:
+            self._tree_ctx_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._tree_ctx_menu.grab_release()
+
+    def _ctx_reroll_item(self):
+        if self.selected_row:
+            self._reroll_single_item(self.selected_row)
+
+    def _ctx_toggle_lock(self):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        for item in self.current_items:
+            if item["name"] == iid:
+                item["locked"] = not item.get("locked", False)
+                break
+        self._populate_table(self.current_items)
+
+    # ── Mark as Sold ──────────────────────────────────────────────────────────
+    def _ctx_mark_as_sold(self):
+        if not self.selected_row:
+            return
+        item = self.selected_row
+        c    = self.colors
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Mark as Sold")
+        dlg.geometry("320x230")
+        dlg.configure(bg=c["hdr"])
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        tk.Label(dlg, text=f"Selling:  {item['name']}",
+                 bg=c["hdr"], fg=c["accent"],
+                 font=("Georgia", 10, "bold"),
+                 wraplength=290).pack(padx=16, pady=(14, 4))
+
+        tk.Label(dlg, text="Quantity sold:", bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 9)).pack(anchor="w", padx=16)
+        try:
+            max_qty = int(item.get("quantity", "1") or "1")
+        except (ValueError, TypeError):
+            max_qty = 1
+        qty_var = tk.IntVar(value=1)
+        tk.Spinbox(dlg, from_=1, to=max(max_qty, 1), textvariable=qty_var,
+                   width=8, bg=c["sel"], fg=c["fg"],
+                   buttonbackground=c["sel"], relief="flat",
+                   font=("Georgia", 9)).pack(anchor="w", padx=16, pady=(2, 8))
+
+        tk.Label(dlg, text="Session tag (optional, e.g. 'Session 12'):",
+                 bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 9)).pack(anchor="w", padx=16)
+        session_var = tk.StringVar()
+        tk.Entry(dlg, textvariable=session_var, width=26,
+                 bg=c["sel"], fg=c["fg"], insertbackground=c["fg"],
+                 relief="flat", font=("Georgia", 9)).pack(anchor="w", padx=16, pady=(2, 12))
+
+        def _confirm():
+            qty_sold = qty_var.get()
+            session  = session_var.get().strip()
+            dlg.destroy()
+            self._record_sale(item, qty_sold, session)
+
+        btn_row = tk.Frame(dlg, bg=c["hdr"])
+        btn_row.pack(fill="x", padx=16)
+        ttk.Button(btn_row, text="✔ Confirm", command=_confirm).pack(side="right")
+        ttk.Button(btn_row, text="Cancel",    command=dlg.destroy).pack(side="right", padx=(0, 6))
+
+    def _record_sale(self, item: dict, qty_sold: int, session: str):
+        shop_name = self.shop_name_var.get().strip() or "Unknown Shop"
+
+        try:
+            current_qty = int(item.get("quantity", "1") or "1")
+        except (ValueError, TypeError):
+            current_qty = 1
+
+        qty_sold = min(qty_sold, current_qty)
+        new_qty  = current_qty - qty_sold
+
+        price = apply_price_mod(item.get("cost_given", ""), self.price_modifier.get())
+
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            "INSERT INTO transactions "
+            "(shop_name, item_name, rarity, quantity, price, session_tag, action) "
+            "VALUES (?,?,?,?,?,?,'sold')",
+            (shop_name, item["name"], item.get("rarity", ""),
+             qty_sold, price, session))
+        con.commit()
+        con.close()
+
+        item["quantity"] = str(new_qty)
+        for shop_item in self.current_items:
+            if shop_item["name"] == item["name"]:
+                shop_item["quantity"] = str(new_qty)
+                break
+
+        if new_qty <= 0:
+            self.current_items = [i for i in self.current_items
+                                   if i["name"] != item["name"]]
+            self._populate_table(self.current_items)
+            self._clear_inspect()
+            self.status_var.set(
+                f"💰 Sold {qty_sold}× '{item['name']}' — removed from inventory.")
+        else:
+            self._populate_table(self.current_items)
+            self.status_var.set(
+                f"💰 Sold {qty_sold}× '{item['name']}' — {new_qty} remaining.")
+
+        if hasattr(self, "log_tree"):
+            self._refresh_log()
+
     # ── Save / Load ───────────────────────────────────────────────────────────
     def _save_shop(self):
         campaign  = self.save_campaign_var.get().strip()
@@ -3917,8 +4485,8 @@ class ShopApp(tk.Tk):
             self.gallery_tree.column(col, width=w,
                                      anchor="w" if col in ("name","type") else "center")
 
-        self.gallery_tree.tag_configure("odd",  background=ROW_ODD)
-        self.gallery_tree.tag_configure("even", background=ROW_EVEN)
+        self.gallery_tree.tag_configure("odd",  background=self.ROW_ODD)
+        self.gallery_tree.tag_configure("even", background=self.ROW_EVEN)
         for rarity, color in GTAG_RARITY_COLORS.items():
             self.gallery_tree.tag_configure(
                 rarity.replace(" ", "_"), foreground=color)
