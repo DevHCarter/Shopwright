@@ -124,7 +124,8 @@ def culture_match(item: dict, active_culture: str | None) -> bool:
 BASE_DIR  = Path(__file__).parent
 DATA_DIR  = BASE_DIR / "shop_data"
 DATA_DIR.mkdir(exist_ok=True)
-DB_PATH   = DATA_DIR / "shops.db"
+DB_PATH    = DATA_DIR / "shops.db"
+PREFS_PATH = DATA_DIR / "prefs.json"
 
 # Single master CSV — all items with Shop_Pools column
 MASTER_CSV = BASE_DIR / "Items_Beta_1.csv"
@@ -219,7 +220,7 @@ RARITY_ORDER = {
 }
 
 # ── Rarity display colours ─────────────────────────────────────────────────────
-RARITY_COLORS_MAP: dict[str, str] = {
+RARITY_COLORS_MAP: dict[str, str] = {          # dark mode
     "mundane":    "#999999",
     "none":       "#c8c8c8",
     "common":     "#c8c8c8",
@@ -228,6 +229,16 @@ RARITY_COLORS_MAP: dict[str, str] = {
     "very rare":  "#a335ee",
     "legendary":  "#ff8000",
     "artifact":   "#cc1212",
+}
+RARITY_COLORS_MAP_LIGHT: dict[str, str] = {   # light mode
+    "mundane":    "#A0A0A0",
+    "none":       "#515151",
+    "common":     "#515151",
+    "uncommon":   "#17BB00",
+    "rare":       "#005EBB",
+    "very rare":  "#6D0FAC",
+    "legendary":  "#CE6700",
+    "artifact":   "#AC0F0F",
 }
 
 # ── DM's Guide price ranges ────────────────────────────────────────────────────
@@ -1077,10 +1088,20 @@ class ToolTip:
 class ShopApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("D&D Shop Generator")
+        self.title("ShopWrite")
         self.geometry("1380x860")
         self.minsize(1100, 700)
-        self.theme_mode = tk.StringVar(value="dark")
+        saved_theme   = "dark"
+        saved_session = "1"
+        try:
+            _prefs        = json.loads(PREFS_PATH.read_text())
+            saved_theme   = _prefs.get("theme",   "dark")
+            saved_session = _prefs.get("session",  "1")
+        except Exception:
+            pass
+        self.theme_mode           = tk.StringVar(value=saved_theme)
+        self.current_session_var  = tk.StringVar(value=saved_session)
+        self.current_session_var.trace_add("write", lambda *_: self._save_prefs())
         self._apply_theme(self.theme_mode.get())
         self.configure(bg=self.colors["hdr"])
 
@@ -1166,23 +1187,27 @@ class ShopApp(tk.Tk):
         style.theme_use("clam")
 
         if mode == "light":
-            bg, fg, accent, sel = "#f5f0e8", "#2a2010", "#7a4f0e", "#e0d8c0"
-            hdr                 = "#ede5d0"
-            row_odd             = "#f0ece0"
-            row_even            = "#e8e4d8"
-            row_locked_odd      = "#e8ead8"
-            row_locked_even     = "#dfe0d0"
-            row_selected        = "#d4c898"
-            btn_active          = "#9b6b1e"
+            bg, fg, accent, sel = "#E6E1D9", "#2A1810", "#C6974C", "#D4BCA7"
+            hdr                 = "#D4BCA7"
+            btn_fg              = "#000000"
+            row_odd             = "#F8E6E0"
+            row_even            = "#EDD8D2"
+            row_locked_odd      = "#E8E8D8"
+            row_locked_even     = "#DDDDD0"
+            row_selected        = "#D4BCA7"
+            btn_active          = "#A87B38"
+            self.rarity_colors  = RARITY_COLORS_MAP_LIGHT
         else:  # dark
             bg, fg, accent, sel = "#1a1a2e", "#e0d8c0", "#c9a84c", "#2d2d4e"
             hdr                 = "#0f0f1e"
+            btn_fg              = hdr
             row_odd             = "#1e1e30"
             row_even            = "#171725"
             row_locked_odd      = "#1e1e10"
             row_locked_even     = "#17170d"
             row_selected        = "#2e2a14"
             btn_active          = "#e6c06a"
+            self.rarity_colors  = RARITY_COLORS_MAP
 
         self.ROW_ODD          = row_odd
         self.ROW_EVEN         = row_even
@@ -1196,10 +1221,10 @@ class ShopApp(tk.Tk):
                         padding=[14, 6], font=("Georgia", 10, "bold"))
         style.map("TNotebook.Tab",
                   background=[("selected", accent)],
-                  foreground=[("selected", hdr)])
+                  foreground=[("selected", btn_fg)])
         style.configure("TFrame",  background=bg)
         style.configure("TLabel",  background=bg, foreground=fg)
-        style.configure("TButton", background=accent, foreground=hdr,
+        style.configure("TButton", background=accent, foreground=btn_fg,
                         font=("Georgia", 10, "bold"), padding=6, relief="flat")
         style.map("TButton", background=[("active", btn_active)])
         style.configure("Danger.TButton", background="#8b0000", foreground="#e0d8c0")
@@ -1209,30 +1234,34 @@ class ShopApp(tk.Tk):
                         fieldbackground=row_odd, rowheight=26,
                         font=("Consolas", 9))
         style.configure("Treeview.Heading",
-                        background=hdr, foreground=accent,
+                        background=hdr, foreground=fg,
                         font=("Georgia", 9, "bold"))
         style.map("Treeview",
                   background=[("selected", accent)],
-                  foreground=[("selected", hdr)])
+                  foreground=[("selected", btn_fg)])
         style.configure("TCombobox", fieldbackground=sel, background=sel, foreground=fg)
         style.configure("TScale",  background=bg, troughcolor=sel)
         style.configure("TEntry",  fieldbackground=sel, foreground=fg, insertcolor=fg)
         style.configure("TSeparator", background=accent)
-        self.colors = {"bg": bg, "fg": fg, "accent": accent, "sel": sel, "hdr": hdr}
+        self.colors = {"bg": bg, "fg": fg, "accent": accent, "sel": sel, "hdr": hdr, "btn_fg": btn_fg}
 
     def _switch_theme(self):
         """Toggle between dark and light mode and recolor all widgets."""
         self._old_hdr = self.colors["hdr"]
         self._old_bg  = self.colors["bg"]
+        self._old_sel = self.colors["sel"]
+        self._save_prefs()
         self._apply_theme(self.theme_mode.get())
         self.configure(bg=self.colors["hdr"])
 
-        # Update Treeview row tag backgrounds
+        # Update Treeview row tag backgrounds and rarity foreground colors
         for tree_attr in ("tree", "sell_results_tree", "gallery_tree"):
             tw = getattr(self, tree_attr, None)
             if tw:
                 tw.tag_configure("odd",  background=self.ROW_ODD)
                 tw.tag_configure("even", background=self.ROW_EVEN)
+                for rarity, color in self.rarity_colors.items():
+                    tw.tag_configure(rarity.replace(" ", "_"), foreground=color)
         if hasattr(self, "tree"):
             self.tree.tag_configure("locked_odd",   background=self.ROW_LOCKED_ODD)
             self.tree.tag_configure("locked_even",  background=self.ROW_LOCKED_EVEN)
@@ -1240,15 +1269,55 @@ class ShopApp(tk.Tk):
         if hasattr(self, "log_tree"):
             self.log_tree.tag_configure("odd",  background=self.ROW_ODD)
             self.log_tree.tag_configure("even", background=self.ROW_EVEN)
+            for rarity, color in self.rarity_colors.items():
+                self.log_tree.tag_configure(rarity.replace(" ", "_"), foreground=color)
 
         self._recolor_widgets(self.winfo_children())
         self._populate_table(self.current_items)
         if hasattr(self, "log_tree"):
             self._refresh_log()
 
+    def _save_prefs(self):
+        try:
+            PREFS_PATH.write_text(json.dumps({
+                "theme":   self.theme_mode.get(),
+                "session": self.current_session_var.get(),
+            }))
+        except Exception:
+            pass
+
+    def _on_session_change(self):
+        self._save_prefs()
+
+    def _rgb(self, color):
+        """Return (r,g,b) 0-255 tuple for a color, or None on failure."""
+        try:
+            r, g, b = self.winfo_rgb(color)
+            return (r >> 8, g >> 8, b >> 8)
+        except Exception:
+            return None
+
     def _recolor_widgets(self, widgets):
         """Recursively update bg/fg on all non-ttk (tk.*) widgets."""
-        c    = self.colors
+        c = self.colors
+        # Build a normalized lookup: old-color-rgb → new-color so that
+        # Windows' 12-digit #rrrrggggbbbb cget() format doesn't break equality.
+        old_hdr_rgb = self._rgb(self._old_hdr)
+        old_bg_rgb  = self._rgb(self._old_bg)
+        old_sel_rgb = self._rgb(getattr(self, "_old_sel", self._old_bg))
+        rarity_rgb  = {self._rgb(v): True for v in self.rarity_colors.values()}
+
+        def map_bg(widget):
+            try:
+                cur_rgb = self._rgb(widget.cget("bg"))
+                if cur_rgb == old_hdr_rgb:
+                    return c["hdr"]
+                if cur_rgb == old_sel_rgb:
+                    return c["sel"]
+                return c["bg"]
+            except Exception:
+                return c["bg"]
+
         ttk_classes = {
             "TButton", "TLabel", "TFrame", "TNotebook", "TNotebook.Tab",
             "TCombobox", "TScale", "TEntry", "TSeparator", "TScrollbar",
@@ -1260,15 +1329,16 @@ class ShopApp(tk.Tk):
                 pass  # handled by ttk.Style
             elif cls == "Frame":
                 try:
-                    cur = w.cget("bg")
-                    w.configure(bg=c["hdr"] if cur == self._old_hdr else c["bg"])
+                    w.configure(bg=map_bg(w))
                 except Exception:
                     pass
             elif cls in ("Label", "Checkbutton", "Radiobutton"):
                 try:
-                    cur    = w.cget("bg")
-                    new_bg = c["hdr"] if cur == self._old_hdr else c["bg"]
-                    w.configure(bg=new_bg, fg=c["fg"],
+                    new_bg = map_bg(w)
+                    # Preserve rarity foreground colors; update everything else
+                    cur_fg_rgb = self._rgb(w.cget("fg"))
+                    new_fg = w.cget("fg") if cur_fg_rgb in rarity_rgb else c["fg"]
+                    w.configure(bg=new_bg, fg=new_fg,
                                 activebackground=new_bg,
                                 activeforeground=c["accent"],
                                 selectcolor=c["sel"])
@@ -1313,7 +1383,7 @@ class ShopApp(tk.Tk):
         top = tk.Frame(self, bg=c["hdr"], pady=6)
         top.pack(fill="x")
 
-        tk.Label(top, text="[ D&D Shop Generator ]",
+        tk.Label(top, text="《 Shop᛭Wright 》",
                  font=("Georgia", 15, "bold"),
                  bg=c["hdr"], fg=c["accent"]).pack(side="left", padx=14)
 
@@ -1325,6 +1395,17 @@ class ShopApp(tk.Tk):
 
         ttk.Button(top, text="↻ Name",
                    command=self._random_name).pack(side="left", padx=(0, 16))
+
+        tk.Label(top, text="Session #:", bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 10)).pack(side="left", padx=(0, 4))
+        _session_spin = tk.Spinbox(top, from_=1, to=999,
+                   textvariable=self.current_session_var,
+                   width=5, bg=c["sel"], fg=c["fg"], insertbackground=c["fg"],
+                   buttonbackground=c["sel"], relief="flat",
+                   font=("Georgia", 10, "bold"),
+                   command=self._on_session_change)
+        _session_spin.pack(side="left", padx=(0, 16))
+        _session_spin.bind("<FocusOut>", lambda e: self._on_session_change())
 
         # ── Gear / App Settings button (top-right) ────────────────────────────
         gear_btn = tk.Label(top, text="⚙", font=("Georgia", 16),
@@ -1494,7 +1575,7 @@ class ShopApp(tk.Tk):
         self.sell_results_tree.column("buy_price", width=110, anchor="center")
 
         # Rarity foreground tags
-        RARITY_COLORS = RARITY_COLORS_MAP
+        RARITY_COLORS = self.rarity_colors
         for rarity, color in RARITY_COLORS.items():
             self.sell_results_tree.tag_configure(
                 rarity.replace(" ", "_"), foreground=color)
@@ -1557,7 +1638,7 @@ class ShopApp(tk.Tk):
         for w in self.sell_panel.winfo_children():
             w.destroy()
 
-        rcolor = RARITY_COLORS_MAP.get(normalize_rarity(item.get("Rarity", "")), c["fg"])
+        rcolor = self.rarity_colors.get(normalize_rarity(item.get("Rarity", "")), c["fg"])
         wrap   = 260
 
         # ── Name ──
@@ -1654,7 +1735,7 @@ class ShopApp(tk.Tk):
         matches = [i for i in ALL_ITEMS_FLAT
                    if q in i.get("Name", "").lower()][:80]
 
-        RARITY_COLORS = RARITY_COLORS_MAP
+        RARITY_COLORS = self.rarity_colors
         for row_idx, item in enumerate(matches):
             calc_p_val = parse_given_cost(item.get("Value", ""))
             calc_p  = calc_p_val if calc_p_val else 0.0   # keep as float — sub-GP values matter
@@ -1778,7 +1859,7 @@ class ShopApp(tk.Tk):
         self.tree.tag_configure("locked_even",  background=self.ROW_LOCKED_EVEN)
         self.tree.tag_configure("selected_row", background=self.ROW_SELECTED)
 
-        RARITY_FG = RARITY_COLORS_MAP
+        RARITY_FG = self.rarity_colors
         for rarity, color in RARITY_FG.items():
             tag = rarity.replace(" ", "_")
             self.tree.tag_configure(tag, foreground=color)
@@ -1988,12 +2069,12 @@ class ShopApp(tk.Tk):
 
         c       = self.colors
         n_cols  = max(len(headers), 1)
-        TTL_BG  = "#111128"
-        HDR_BG  = "#1c1c3a"
+        TTL_BG  = c["hdr"]
+        HDR_BG  = c["sel"]
         HDR_FG  = c["accent"]
-        ROW_A   = "#1a1a30"
-        ROW_B   = "#1e1e38"
-        SEP_CLR = "#2a2a50"
+        ROW_A   = self.ROW_ODD
+        ROW_B   = self.ROW_EVEN
+        SEP_CLR = c["accent"]
 
         outer = tk.Frame(parent, bg=SEP_CLR, bd=0, relief="flat")
 
@@ -2138,7 +2219,7 @@ class ShopApp(tk.Tk):
 
     def _render_inspect_collapsed(self, item: dict):
         c = self.colors
-        RARITY_FG = RARITY_COLORS_MAP
+        RARITY_FG = self.rarity_colors
         rcolor = RARITY_FG.get(normalize_rarity(item.get("rarity", "")), c["fg"])
         wrap   = 370   # wider to match new 400px panel
 
@@ -2239,7 +2320,7 @@ class ShopApp(tk.Tk):
     def _render_inspect_expanded(self, item: dict):
         c   = self.colors
         pad = 16
-        RARITY_FG = RARITY_COLORS_MAP
+        RARITY_FG = self.rarity_colors
         rarity = item.get("rarity", "")
         rcolor = RARITY_FG.get(normalize_rarity(rarity), c["fg"])
 
@@ -2341,13 +2422,13 @@ class ShopApp(tk.Tk):
 
             if desc:
                 prose = re.sub(r'(?<=[a-z])([.!?])(\)?)(?=[A-Z])', r'\1\2\n\n', desc)
-                desc_bg = "#16162a"
+                desc_bg = c["sel"]
                 desc_frame = tk.Frame(self.inspect_frame, bg=desc_bg,
-                                      highlightbackground="#2a2a4a",
+                                      highlightbackground=c["accent"],
                                       highlightthickness=1)
                 desc_frame.pack(fill="x", padx=pad, pady=(0, 8))
                 tk.Label(desc_frame, text=prose,
-                         bg=desc_bg, fg="#d8d0b8",
+                         bg=desc_bg, fg=c["fg"],
                          font=("Georgia", 11),
                          wraplength=max(300, self._inspect_width_expanded or 500) - pad * 2 - 28,
                          justify="left", anchor="nw",
@@ -2416,7 +2497,7 @@ class ShopApp(tk.Tk):
                  bg=c["bg"], fg=c["fg"],
                  font=("Georgia", 8, "italic")).pack(anchor="w", pady=(0, 8))
 
-        RARITY_COLORS = RARITY_COLORS_MAP
+        RARITY_COLORS = self.rarity_colors
         self.slider_labels: dict[str, tk.StringVar] = {}
 
         for rarity in ["common", "uncommon", "rare", "very rare", "legendary", "artifact"]:
@@ -2513,7 +2594,7 @@ class ShopApp(tk.Tk):
             add_tree.column(col, width=w,
                             anchor="w" if col in ("name", "type") else "center")
 
-        RARITY_FG = RARITY_COLORS_MAP
+        RARITY_FG = self.rarity_colors
         for rarity, color in RARITY_FG.items():
             add_tree.tag_configure(rarity.replace(" ", "_"), foreground=color)
 
@@ -3202,7 +3283,7 @@ class ShopApp(tk.Tk):
         self.log_tree.pack(side="left", fill="both", expand=True)
         log_vsb.pack(side="right", fill="y")
 
-        for rarity, color in RARITY_COLORS_MAP.items():
+        for rarity, color in self.rarity_colors.items():
             self.log_tree.tag_configure(rarity.replace(" ", "_"), foreground=color)
         self.log_tree.tag_configure("odd",  background=self.ROW_ODD)
         self.log_tree.tag_configure("even", background=self.ROW_EVEN)
@@ -3368,7 +3449,7 @@ class ShopApp(tk.Tk):
         canvas.bind("<Configure>", _on_canvas_configure)
 
         # Build one collapsible section per category
-        RARITY_COLORS = RARITY_COLORS_MAP
+        RARITY_COLORS = self.rarity_colors
         for cat_name, tags in TAG_CATEGORIES.items():
             self._build_tag_section(inner, cat_name, tags, c, RARITY_COLORS)
 
@@ -3400,8 +3481,9 @@ class ShopApp(tk.Tk):
         body = tk.Frame(section, bg=c["bg"])
 
         # ── State colours ──────────────────────────────────────────────────────
-        STATE_FG  = {0: c["fg"],    1: "#1eff00", 2: "#ff4444"}
-        STATE_BG  = {0: c["bg"],    1: "#0d1f0d", 2: "#1f0d0d"}
+        _light = self.theme_mode.get() == "light"
+        STATE_FG  = {0: c["fg"],    1: "#1a7a1a" if _light else "#1eff00", 2: "#991111" if _light else "#ff4444"}
+        STATE_BG  = {0: c["bg"],    1: "#c8f0c8" if _light else "#0d1f0d", 2: "#f0c8c8" if _light else "#1f0d0d"}
         STATE_PFX = {0: "  ",       1: "✓ ",      2: "✗ "}
 
         def _refresh_count():
@@ -3503,8 +3585,9 @@ class ShopApp(tk.Tk):
 
     def _repaint_all_tag_buttons(self):
         """Walk the widget tree and repaint any tag cycle-buttons to match state."""
-        STATE_FG  = {0: self.colors["fg"], 1: "#1eff00", 2: "#ff4444"}
-        STATE_BG  = {0: self.colors["bg"], 1: "#0d1f0d", 2: "#1f0d0d"}
+        _light = self.theme_mode.get() == "light"
+        STATE_FG  = {0: self.colors["fg"], 1: "#1a7a1a" if _light else "#1eff00", 2: "#991111" if _light else "#ff4444"}
+        STATE_BG  = {0: self.colors["bg"], 1: "#c8f0c8" if _light else "#0d1f0d", 2: "#f0c8c8" if _light else "#1f0d0d"}
         STATE_PFX = {0: "  ",             1: "✓ ",      2: "✗ "}
         for tag, var in self._tag_state_vars.items():
             s = var.get()
@@ -3947,9 +4030,12 @@ class ShopApp(tk.Tk):
         item = self.selected_row
         c    = self.colors
 
+        session_num = self.current_session_var.get().strip() or "1"
+        session_tag = f"Session {session_num}"
+
         dlg = tk.Toplevel(self)
         dlg.title("Mark as Sold")
-        dlg.geometry("320x230")
+        dlg.geometry("320x175")
         dlg.configure(bg=c["hdr"])
         dlg.resizable(False, False)
         dlg.grab_set()
@@ -3958,6 +4044,10 @@ class ShopApp(tk.Tk):
                  bg=c["hdr"], fg=c["accent"],
                  font=("Georgia", 10, "bold"),
                  wraplength=290).pack(padx=16, pady=(14, 4))
+
+        tk.Label(dlg, text=f"Session: {session_tag}",
+                 bg=c["hdr"], fg=c["fg"],
+                 font=("Georgia", 9, "italic")).pack(anchor="w", padx=16, pady=(0, 6))
 
         tk.Label(dlg, text="Quantity sold:", bg=c["hdr"], fg=c["fg"],
                  font=("Georgia", 9)).pack(anchor="w", padx=16)
@@ -3969,21 +4059,12 @@ class ShopApp(tk.Tk):
         tk.Spinbox(dlg, from_=1, to=max(max_qty, 1), textvariable=qty_var,
                    width=8, bg=c["sel"], fg=c["fg"],
                    buttonbackground=c["sel"], relief="flat",
-                   font=("Georgia", 9)).pack(anchor="w", padx=16, pady=(2, 8))
-
-        tk.Label(dlg, text="Session tag (optional, e.g. 'Session 12'):",
-                 bg=c["hdr"], fg=c["fg"],
-                 font=("Georgia", 9)).pack(anchor="w", padx=16)
-        session_var = tk.StringVar()
-        tk.Entry(dlg, textvariable=session_var, width=26,
-                 bg=c["sel"], fg=c["fg"], insertbackground=c["fg"],
-                 relief="flat", font=("Georgia", 9)).pack(anchor="w", padx=16, pady=(2, 12))
+                   font=("Georgia", 9)).pack(anchor="w", padx=16, pady=(2, 12))
 
         def _confirm():
             qty_sold = qty_var.get()
-            session  = session_var.get().strip()
             dlg.destroy()
-            self._record_sale(item, qty_sold, session)
+            self._record_sale(item, qty_sold, session_tag)
 
         btn_row = tk.Frame(dlg, bg=c["hdr"])
         btn_row.pack(fill="x", padx=16)
@@ -4417,7 +4498,7 @@ class ShopApp(tk.Tk):
         gtag_inner.bind("<Configure>", _gtag_inner_configure)
         gtag_canvas.bind("<Configure>", _gtag_canvas_configure)
 
-        GTAG_RARITY_COLORS = RARITY_COLORS_MAP
+        GTAG_RARITY_COLORS = self.rarity_colors
         for cat_name, tags in TAG_CATEGORIES.items():
             self._build_gallery_tag_section(gtag_inner, cat_name, tags, c, GTAG_RARITY_COLORS)
 
@@ -4590,8 +4671,9 @@ class ShopApp(tk.Tk):
                  font=("Consolas", 8)).pack(side="right", padx=8)
         body = tk.Frame(section, bg=c["bg"])
 
-        STATE_FG  = {0: c["fg"],    1: "#1eff00", 2: "#ff4444"}
-        STATE_BG  = {0: c["bg"],    1: "#0d1f0d", 2: "#1f0d0d"}
+        _light = self.theme_mode.get() == "light"
+        STATE_FG  = {0: c["fg"],    1: "#1a7a1a" if _light else "#1eff00", 2: "#991111" if _light else "#ff4444"}
+        STATE_BG  = {0: c["bg"],    1: "#c8f0c8" if _light else "#0d1f0d", 2: "#f0c8c8" if _light else "#1f0d0d"}
         STATE_PFX = {0: "  ",       1: "✓ ",      2: "✗ "}
 
         def _refresh_count():
@@ -4692,8 +4774,9 @@ class ShopApp(tk.Tk):
 
     def _repaint_gallery_tag_buttons(self):
         """Repaint all gallery tag buttons to match their current IntVar state."""
-        STATE_FG  = {0: self.colors["fg"], 1: "#1eff00", 2: "#ff4444"}
-        STATE_BG  = {0: self.colors["bg"], 1: "#0d1f0d", 2: "#1f0d0d"}
+        _light = self.theme_mode.get() == "light"
+        STATE_FG  = {0: self.colors["fg"], 1: "#1a7a1a" if _light else "#1eff00", 2: "#991111" if _light else "#ff4444"}
+        STATE_BG  = {0: self.colors["bg"], 1: "#c8f0c8" if _light else "#0d1f0d", 2: "#f0c8c8" if _light else "#1f0d0d"}
         STATE_PFX = {0: "  ",             1: "✓ ",      2: "✗ "}
         for tag, var in self._gallery_tag_state_vars.items():
             s = var.get()
