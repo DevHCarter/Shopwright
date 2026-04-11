@@ -3342,14 +3342,14 @@ class ShopApp(tk.Tk):
                        activebackground=c["hdr"], activeforeground=c["accent"],
                        font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
 
-        _homebrew_var = tk.BooleanVar(value=self.exclude_homebrew_var.get())
+        _homebrew_var = tk.BooleanVar(value=not self.exclude_homebrew_var.get())
         tk.Checkbutton(body,
-                       text="DND Official Only  (removes all homebrew items)",
+                       text="Include Homebrew Items",
                        variable=_homebrew_var,
                        bg=c["hdr"], fg=c["fg"], selectcolor=c["sel"],
                        activebackground=c["hdr"], activeforeground=c["accent"],
                        font=("Georgia", 9)).pack(anchor="w", padx=pad, pady=2)
-        tk.Label(body, text="Filters out The Griffon's Saddlebag Books 1–5",
+        tk.Label(body, text="Includes The Griffon's Saddlebag Books 1–5",
                  bg=c["hdr"], fg=c["fg"],
                  font=("Georgia", 8, "italic")).pack(anchor="w", padx=pad+16, pady=(0, 4))
 
