@@ -1366,7 +1366,11 @@ class ShopApp(tk.Tk):
             con = sqlite3.connect(DB_PATH)
             con.executemany(
                 "INSERT OR REPLACE INTO preferences (key, value) VALUES (?, ?)",
-                [("theme", self.theme_mode.get()), ("session", self.current_session_var.get())]
+                [
+                    ("theme",            self.theme_mode.get()),
+                    ("session",          self.current_session_var.get()),
+                    ("include_homebrew", str(int(not self.exclude_homebrew_var.get()))),
+                ]
             )
             con.commit()
             con.close()
