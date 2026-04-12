@@ -2642,7 +2642,7 @@ class ShopApp(tk.Tk):
                  font=("Georgia", 11, "bold"),
                  bg=c["bg"], fg=c["accent"]).pack(anchor="w", pady=(0, 4))
         tk.Label(right_col,
-                 text="Adjust sliders to override wealth presets. Total should equal 100%.",
+                 text="Adjust sliders to customize rarity distribution.",
                  bg=c["bg"], fg=c["fg"],
                  font=("Georgia", 8, "italic")).pack(anchor="w", pady=(0, 8))
 

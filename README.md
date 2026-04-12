@@ -28,7 +28,7 @@ Installation is very straight foward, but for those who arent familiar, here is 
 ```
 Folder Name
 ├── assets
-|    └── shopwright_24px.png       # Just a .png you see above :p
+|    └── shopwright_24px.png       # Logo
 ├── data      
 |    └── shops.db                  # Where your shop preferences and saves are stored
 |    └── Jacquard24-Regular.ttf    # A custom font     
