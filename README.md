@@ -47,7 +47,7 @@ As of now, here are the goals as of now:
 - [ ] Spell Scroll/Enspelled Item Randomizer
 - [ ] 1.0 Release
 - [ ] Player-viewable shop interface
-- [ ] Loot Generator (Dragon Horde too)
+- [ ] Loot Generator
 
 ---
 
