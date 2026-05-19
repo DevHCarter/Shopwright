@@ -135,6 +135,13 @@ Size Mod Table
 | Legendary | 0 | 0 | 0 | 0 |
 
 ---
+### Staples & Semi-Staples
+
+In addition to all shops having a roll for the items that appear in the shop, there are staples that all of a certain shop type should always have, and some that are quite common and any shop *should* have. These items are denoted as Staples and Semistaples. Staples for a certain shop pool will always appear in a shop (for ex: A fletcher will always have a longbow); Semi-Staples are similar in functionality, but have a 50% chance of being generated in the shop rather than 100%. 
+
+General Stores work differently than normal shops in that ~90% of their pool are staples and semi-staples, meaning you will always get a predictable output for general stores while retaining the rolling functionality.
+
+---
 
 ### Price Modifier
 Slider in the Action tab adjusts all displayed prices from 50% to 125% of list price. Useful for haggling, special sales, or greedy shopkeepers.
