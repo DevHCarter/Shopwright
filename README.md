@@ -41,7 +41,7 @@ Folder Name
 
 I have some optimistic plans for this project, and I am 100% open to suggestions for future features, or if anyone wants to make their own plugin, please do!
 
-As of now, here are the goals as of now:
+As of now, here are the goals:
 
 - [ ] Shop Info Tab Update
 - [ ] Spell Scroll/Enspelled Item Randomizer
